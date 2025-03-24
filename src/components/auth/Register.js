@@ -71,8 +71,8 @@ export default function Register() {
     return () => clearTimeout(timer);
   }, [email, checkEmailExists]);
 
-  const validateStep = () => {
-    if (activeStep === 0) {
+  const validateStep = (step) => {
+    if (step === 0) {
       if (!email) {
         setError('Email is required');
         return false;
@@ -93,7 +93,7 @@ export default function Register() {
         setError('Passwords do not match');
         return false;
       }
-    } else if (activeStep === 1) {
+    } else if (step === 1) {
       if (!firstName) {
         setError('First name is required');
         return false;
@@ -108,7 +108,7 @@ export default function Register() {
 
   const handleNext = () => {
     setError('');
-    if (!validateStep()) return;
+    if (!validateStep(activeStep)) return;
     
     setActiveStep((prevStep) => prevStep + 1);
   };
@@ -118,16 +118,46 @@ export default function Register() {
     setActiveStep((prevStep) => prevStep - 1);
   };
 
+  // Load saved form state when component mounts
+  useEffect(() => {
+    const savedState = localStorage.getItem('registerFormState');
+    if (savedState) {
+      const {
+        email: savedEmail,
+        password: savedPassword,
+        confirmPassword: savedConfirmPassword,
+        firstName: savedFirstName,
+        lastName: savedLastName,
+        role: savedRole
+      } = JSON.parse(savedState);
+      
+      setEmail(savedEmail);
+      setPassword(savedPassword);
+      setConfirmPassword(savedConfirmPassword);
+      setFirstName(savedFirstName);
+      setLastName(savedLastName);
+      setRole(savedRole);
+    }
+  }, []);
+
+  // Clear saved form state when component unmounts
+  useEffect(() => {
+    return () => {
+      localStorage.removeItem('registerFormState');
+    };
+  }, []);
+
   async function handleSubmit(e) {
     if (e) e.preventDefault();
     
     // Final validation before submission
-    if (!validateStep()) return;
+    if (!validateStep(activeStep)) return;
 
     try {
       setError('');
       setLoading(true);
       
+      // Only create account when explicitly called
       await signup(email, password, firstName, lastName, role);
       navigate('/dashboard');
     } catch (error) {
