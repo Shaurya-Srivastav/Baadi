@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -10,7 +10,8 @@ import {
   CardContent,
   Alert,
   FormControlLabel,
-  Checkbox
+  Checkbox,
+  CircularProgress
 } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -25,6 +26,16 @@ export default function Login() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+
+    if (!email) {
+      setError('Email is required');
+      return;
+    }
+
+    if (!password) {
+      setError('Password is required');
+      return;
+    }
 
     try {
       setError('');
@@ -41,14 +52,26 @@ export default function Login() {
       navigate('/dashboard');
     } catch (error) {
       console.error('Login error:', error);
-      setError('Failed to sign in. Please check your credentials.');
+      
+      // More specific error messages
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        setError('Invalid email or password. Please try again.');
+      } else if (error.code === 'auth/invalid-email') {
+        setError('Invalid email format. Please enter a valid email.');
+      } else if (error.code === 'auth/too-many-requests') {
+        setError('Too many failed login attempts. Please try again later or reset your password.');
+      } else if (error.code === 'auth/user-disabled') {
+        setError('This account has been disabled. Please contact support.');
+      } else {
+        setError('Failed to sign in. Please check your credentials.');
+      }
     } finally {
       setLoading(false);
     }
   }
 
   // Check for remembered email on component mount
-  React.useEffect(() => {
+  useEffect(() => {
     const rememberedEmail = localStorage.getItem('rememberedEmail');
     if (rememberedEmail) {
       setEmail(rememberedEmail);
@@ -110,7 +133,7 @@ export default function Login() {
                 control={
                   <Checkbox 
                     value="remember" 
-                    color="primary"
+                    color="primary" 
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
                   />
@@ -123,13 +146,17 @@ export default function Login() {
                 fullWidth
                 variant="contained"
                 color="primary"
-                sx={{ mt: 3, mb: 2 }}
                 disabled={loading}
+                sx={{ mt: 3, mb: 2 }}
               >
-                {loading ? 'Signing in...' : 'Sign In'}
+                {loading ? (
+                  <CircularProgress size={24} color="inherit" />
+                ) : (
+                  'Sign In'
+                )}
               </Button>
               
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between' }}>
                 <Link to="/forgot-password" style={{ textDecoration: 'none' }}>
                   <Typography variant="body2" color="primary">
                     Forgot password?

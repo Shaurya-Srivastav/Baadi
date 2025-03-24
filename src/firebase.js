@@ -1,16 +1,18 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import { getMessaging, isSupported } from 'firebase/messaging';
 
-// Firebase configuration - replace with your project's config
+// Firebase configuration - hardcoded for production, use env vars in development
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
+  apiKey: "AIzaSyDlvkj8DgXD0iwKWC9btSpY19OiAZmVZxw",
+  authDomain: "baadi-98448.firebaseapp.com",
+  projectId: "baadi-98448",
+  storageBucket: "baadi-98448.firebasestorage.app",
+  messagingSenderId: "657000742089",
+  appId: "1:657000742089:web:245b00c6be06a35f036118",
+  measurementId: "G-9787N1J6F6"
 };
 
 // Initialize Firebase
@@ -19,6 +21,7 @@ const app = initializeApp(firebaseConfig);
 // Initialize services
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 // Initialize Firebase Cloud Messaging and get a reference to the service
 // This is wrapped in a function so we can handle environments where FCM isn't supported

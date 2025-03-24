@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { collection, addDoc, query, where, onSnapshot, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, orderBy, limit, Timestamp, updateDoc, doc, getDocs, getDoc } from 'firebase/firestore';
 import { db, initializeMessaging } from '../firebase';
 import { useAuth } from './AuthContext';
-import { getToken } from 'firebase/messaging';
+import { getToken, onMessage } from 'firebase/messaging';
 
 const NotificationContext = createContext();
 
@@ -12,6 +12,7 @@ export function useNotifications() {
 
 export function NotificationProvider({ children }) {
   const [notifications, setNotifications] = useState([]);
+  const [systemNotifications, setSystemNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [permission, setPermission] = useState('default');
   const [fcmToken, setFcmToken] = useState(null);
@@ -42,6 +43,35 @@ export function NotificationProvider({ children }) {
                 token,
                 userId: currentUser.uid,
                 createdAt: Timestamp.now()
+              });
+
+              // Setup message handler
+              onMessage(messaging, (payload) => {
+                console.log('Message received:', payload);
+                
+                // Show browser notification
+                const notificationTitle = payload.notification.title;
+                const notificationOptions = {
+                  body: payload.notification.body,
+                  icon: '/logo192.png'
+                };
+                
+                // Create browser notification
+                new Notification(notificationTitle, notificationOptions);
+                
+                // Add to local state if there's data
+                if (payload.data) {
+                  const newNotification = {
+                    id: Date.now().toString(),
+                    title: notificationTitle,
+                    message: payload.notification.body,
+                    timestamp: new Date(),
+                    read: false,
+                    ...payload.data
+                  };
+                  
+                  setNotifications(prev => [newNotification, ...prev]);
+                }
               });
             }
           }
@@ -88,6 +118,77 @@ export function NotificationProvider({ children }) {
     return unsubscribe;
   }, [currentUser]);
 
+  // Listen for system notifications (like user logins)
+  useEffect(() => {
+    if (!currentUser) {
+      setSystemNotifications([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'systemNotifications'),
+      orderBy('timestamp', 'desc'),
+      limit(20)
+    );
+
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const systemNotificationsList = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.toDate()
+      }));
+      
+      setSystemNotifications(systemNotificationsList);
+      
+      // Create local notifications for any new system notifications
+      systemNotificationsList.forEach(notification => {
+        // Check if this is a new notification we haven't processed yet
+        if (!notification.processedByUser?.includes(currentUser.uid)) {
+          // Create a local alert for this system notification
+          createAlert({
+            type: notification.type,
+            severity: notification.severity,
+            title: notification.title,
+            message: notification.message,
+            systemNotificationId: notification.id
+          });
+          
+          // Mark as processed for this user
+          updateSystemNotificationProcessed(notification.id);
+        }
+      });
+    }, (error) => {
+      console.error('Error fetching system notifications:', error);
+    });
+
+    return unsubscribe;
+  }, [currentUser]);
+
+  // Mark system notification as processed by this user
+  async function updateSystemNotificationProcessed(notificationId) {
+    if (!currentUser) return;
+    
+    try {
+      const notificationRef = doc(db, 'systemNotifications', notificationId);
+      
+      // Get the current notification data
+      const notificationDoc = await getDoc(notificationRef);
+      if (!notificationDoc.exists()) return;
+      
+      const notificationData = notificationDoc.data();
+      const processedByUser = notificationData.processedByUser || [];
+      
+      // Add this user to the processedByUser array if not already present
+      if (!processedByUser.includes(currentUser.uid)) {
+        await updateDoc(notificationRef, {
+          processedByUser: [...processedByUser, currentUser.uid]
+        });
+      }
+    } catch (error) {
+      console.error('Error updating system notification:', error);
+    }
+  }
+
   // Function to create a new alert
   async function createAlert(alertData) {
     if (!currentUser) return null;
@@ -113,14 +214,43 @@ export function NotificationProvider({ children }) {
     if (!currentUser) return false;
     
     try {
-      await addDoc(collection(db, `alerts/${alertId}`), {
+      const alertRef = doc(db, 'alerts', alertId);
+      await updateDoc(alertRef, {
         read: true
-      }, { merge: true });
+      });
+      
+      // Update local state
+      setNotifications(prev => 
+        prev.map(notif => 
+          notif.id === alertId ? { ...notif, read: true } : notif
+        )
+      );
       
       return true;
     } catch (error) {
       console.error('Error marking alert as read:', error);
       return false;
+    }
+  }
+
+  // Function to create a system notification (for all users)
+  async function createSystemNotification(notificationData) {
+    if (!currentUser) return null;
+    
+    try {
+      const newNotification = {
+        createdByUserId: currentUser.uid,
+        timestamp: Timestamp.now(),
+        processedByUser: [currentUser.uid], // Creator has already processed it
+        systemNotification: true,
+        ...notificationData
+      };
+      
+      const docRef = await addDoc(collection(db, 'systemNotifications'), newNotification);
+      return { id: docRef.id, ...newNotification };
+    } catch (error) {
+      console.error('Error creating system notification:', error);
+      return null;
     }
   }
 
@@ -136,11 +266,13 @@ export function NotificationProvider({ children }) {
 
   const value = {
     notifications,
+    systemNotifications,
     loading,
     permission,
     fcmToken,
     createAlert,
     markAlertAsRead,
+    createSystemNotification,
     testNotification
   };
 

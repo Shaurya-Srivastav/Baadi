@@ -6,6 +6,8 @@ import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import ForgotPassword from './components/auth/ForgotPassword';
 import Dashboard from './components/dashboard/Dashboard';
+import Profile from './components/profile/Profile';
+import Notifications from './components/notifications/Notifications';
 import Navbar from './components/layout/Navbar';
 import Settings from './components/settings/Settings';
 import NotFound from './components/NotFound';
@@ -44,6 +46,18 @@ function App() {
           <Route path="/dashboard" element={
             <PrivateRoute>
               <Dashboard />
+            </PrivateRoute>
+          } />
+          
+          <Route path="/profile" element={
+            <PrivateRoute>
+              <Profile />
+            </PrivateRoute>
+          } />
+          
+          <Route path="/notifications" element={
+            <PrivateRoute>
+              <Notifications />
             </PrivateRoute>
           } />
           

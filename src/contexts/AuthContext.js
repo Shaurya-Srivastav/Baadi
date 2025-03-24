@@ -7,9 +7,10 @@ import {
   signOut,
   updateProfile,
   updateEmail,
-  updatePassword
+  updatePassword,
+  fetchSignInMethodsForEmail
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
 const AuthContext = createContext();
@@ -22,9 +23,27 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // Check if email is already registered
+  async function checkEmailExists(email) {
+    try {
+      const methods = await fetchSignInMethodsForEmail(auth, email);
+      return methods.length > 0;
+    } catch (error) {
+      console.error("Error checking email:", error);
+      return false;
+    }
+  }
 
   async function signup(email, password, firstName, lastName, role) {
     try {
+      // First check if email already exists
+      const emailExists = await checkEmailExists(email);
+      if (emailExists) {
+        throw { code: 'auth/email-already-in-use' };
+      }
+      
       // Create user with email and password
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
@@ -39,8 +58,8 @@ export function AuthProvider({ children }) {
         firstName,
         lastName,
         email,
-        role: role || 'primary_caregiver', // Default role
-        createdAt: new Date(),
+        role: role || 'caregiver', // Default role
+        createdAt: serverTimestamp(),
         settings: {
           alertSensitivity: 'medium',
           notificationPreferences: {
@@ -51,8 +70,23 @@ export function AuthProvider({ children }) {
         }
       });
       
+      // Create initial patients collection document for the user
+      if (role === 'patient') {
+        await setDoc(doc(db, 'patients', user.uid), {
+          userId: user.uid,
+          firstName,
+          lastName,
+          email,
+          primaryCaregiver: null,
+          createdAt: serverTimestamp(),
+          lastActive: serverTimestamp(),
+          status: 'active'
+        });
+      }
+      
       return user;
     } catch (error) {
+      console.error("Registration error:", error);
       throw error;
     }
   }
@@ -82,7 +116,10 @@ export function AuthProvider({ children }) {
     
     try {
       // Update Firestore document
-      await setDoc(doc(db, 'users', currentUser.uid), profileData, { merge: true });
+      await setDoc(doc(db, 'users', currentUser.uid), {
+        ...profileData,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
       
       // Fetch the updated profile
       const updatedProfile = await fetchUserProfile(currentUser.uid);
@@ -90,6 +127,7 @@ export function AuthProvider({ children }) {
       
       return updatedProfile;
     } catch (error) {
+      console.error("Error updating profile:", error);
       throw error;
     }
   }
@@ -116,8 +154,12 @@ export function AuthProvider({ children }) {
       setCurrentUser(user);
       
       if (user) {
-        const profile = await fetchUserProfile(user.uid);
-        setUserProfile(profile);
+        try {
+          const profile = await fetchUserProfile(user.uid);
+          setUserProfile(profile);
+        } catch (error) {
+          console.error("Error in auth state change:", error);
+        }
       } else {
         setUserProfile(null);
       }
@@ -132,18 +174,20 @@ export function AuthProvider({ children }) {
     currentUser,
     userProfile,
     loading,
+    error,
     signup,
     login,
     logout,
     resetPassword,
     updateUserEmail,
     updateUserPassword,
-    updateUserProfile
+    updateUserProfile,
+    checkEmailExists
   };
 
   return (
     <AuthContext.Provider value={value}>
-      {children}
+      {!loading && children}
     </AuthContext.Provider>
   );
 }

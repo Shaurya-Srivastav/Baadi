@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -13,61 +13,133 @@ import {
   Grid,
   Stepper,
   Step,
-  StepLabel
+  StepLabel,
+  CircularProgress
 } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 
 const steps = ['Account Information', 'Personal Details', 'Role Selection'];
 
+// Email validation regex
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
 export default function Register() {
   const [activeStep, setActiveStep] = useState(0);
   const [email, setEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [role, setRole] = useState('primary_caregiver');
+  const [role, setRole] = useState('caregiver');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signup } = useAuth();
+  const [checkingEmail, setCheckingEmail] = useState(false);
+  
+  const { signup, checkEmailExists } = useAuth();
   const navigate = useNavigate();
 
-  const handleNext = () => {
-    // Validate current step before proceeding
-    if (activeStep === 0) {
-      if (!email) return setError('Email is required');
-      if (!password) return setError('Password is required');
-      if (password !== confirmPassword) return setError('Passwords do not match');
-      if (password.length < 6) return setError('Password must be at least 6 characters');
-    } else if (activeStep === 1) {
-      if (!firstName) return setError('First name is required');
-      if (!lastName) return setError('Last name is required');
+  // Email validation with debounce
+  useEffect(() => {
+    if (!email) {
+      setEmailError('');
+      return;
     }
-    
+
+    if (!EMAIL_REGEX.test(email)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
+
+    const checkEmail = async () => {
+      setCheckingEmail(true);
+      try {
+        const exists = await checkEmailExists(email);
+        if (exists) {
+          setEmailError('Email is already in use. Please try a different email.');
+        } else {
+          setEmailError('');
+        }
+      } catch (error) {
+        console.error('Error checking email:', error);
+      } finally {
+        setCheckingEmail(false);
+      }
+    };
+
+    const timer = setTimeout(checkEmail, 500);
+    return () => clearTimeout(timer);
+  }, [email, checkEmailExists]);
+
+  const validateStep = () => {
+    if (activeStep === 0) {
+      if (!email) {
+        setError('Email is required');
+        return false;
+      }
+      if (emailError) {
+        setError(emailError);
+        return false;
+      }
+      if (!password) {
+        setError('Password is required');
+        return false;
+      }
+      if (password.length < 6) {
+        setError('Password must be at least 6 characters');
+        return false;
+      }
+      if (password !== confirmPassword) {
+        setError('Passwords do not match');
+        return false;
+      }
+    } else if (activeStep === 1) {
+      if (!firstName) {
+        setError('First name is required');
+        return false;
+      }
+      if (!lastName) {
+        setError('Last name is required');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleNext = () => {
     setError('');
+    if (!validateStep()) return;
+    
     setActiveStep((prevStep) => prevStep + 1);
   };
 
   const handleBack = () => {
+    setError('');
     setActiveStep((prevStep) => prevStep - 1);
   };
 
   async function handleSubmit(e) {
     e.preventDefault();
-
-    if (password !== confirmPassword) {
-      return setError('Passwords do not match');
-    }
+    
+    // Final validation before submission
+    if (!validateStep()) return;
 
     try {
       setError('');
       setLoading(true);
+      
       await signup(email, password, firstName, lastName, role);
       navigate('/dashboard');
     } catch (error) {
       console.error('Registration error:', error);
       if (error.code === 'auth/email-already-in-use') {
         setError('Email is already in use. Please try a different email or login.');
+      } else if (error.code === 'auth/invalid-email') {
+        setError('Invalid email format. Please enter a valid email address.');
+      } else if (error.code === 'auth/weak-password') {
+        setError('Password is too weak. Please choose a stronger password.');
+      } else if (error.code === 'permission-denied') {
+        setError('You do not have permission to register. Please contact support.');
       } else {
         setError('Failed to create an account. Please try again.');
       }
@@ -121,6 +193,13 @@ export default function Register() {
                     autoFocus
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    error={!!emailError}
+                    helperText={emailError}
+                    InputProps={{
+                      endAdornment: checkingEmail ? (
+                        <CircularProgress color="inherit" size={20} />
+                      ) : null,
+                    }}
                   />
                   <TextField
                     margin="normal"
@@ -196,10 +275,10 @@ export default function Register() {
                     onChange={(e) => setRole(e.target.value)}
                     helperText="Please select your role in patient care"
                   >
-                    <MenuItem value="primary_caregiver">Primary Caregiver</MenuItem>
+                    <MenuItem value="caregiver">Primary Caregiver</MenuItem>
                     <MenuItem value="secondary_caregiver">Secondary Caregiver</MenuItem>
                     <MenuItem value="family_member">Family Member</MenuItem>
-                    <MenuItem value="healthcare_professional">Healthcare Professional</MenuItem>
+                    <MenuItem value="patient">Patient</MenuItem>
                   </TextField>
                 </>
               )}
@@ -218,7 +297,7 @@ export default function Register() {
                     type="submit"
                     variant="contained"
                     color="primary"
-                    disabled={loading}
+                    disabled={loading || checkingEmail}
                   >
                     {loading ? 'Creating Account...' : 'Create Account'}
                   </Button>
@@ -226,6 +305,7 @@ export default function Register() {
                   <Button
                     variant="contained"
                     onClick={handleNext}
+                    disabled={checkingEmail}
                   >
                     Next
                   </Button>

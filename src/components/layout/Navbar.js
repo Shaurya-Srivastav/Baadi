@@ -38,6 +38,8 @@ export default function Navbar() {
 
   const pages = [
     { title: 'Dashboard', path: '/dashboard' },
+    { title: 'Notifications', path: '/notifications' },
+    { title: 'Profile', path: '/profile' },
     { title: 'Settings', path: '/settings' }
   ];
 

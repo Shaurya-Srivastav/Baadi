@@ -9,7 +9,6 @@ import {
   CardContent, 
   Divider,
   Button,
-  FormControl,
   InputLabel,
   Select,
   MenuItem,
@@ -34,9 +33,12 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import VideoControls from './VideoControls';
 import StatusIndicator from './StatusIndicator';
 import MLControlPanel from './MLControlPanel';
+import { collection, addDoc, Timestamp, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../../firebase';
 
-// Load TensorFlow.js models
+// TensorFlow models
 let poseDetectionModel = null;
+let movenetModel = null;
 
 export default function Dashboard() {
   const webcamRef = useRef(null);
@@ -47,6 +49,7 @@ export default function Dashboard() {
   const [detectionStatus, setDetectionStatus] = useState('normal'); // 'normal', 'warning', 'alert'
   const [sensitivity, setSensitivity] = useState(50); 
   const [motionHistory, setMotionHistory] = useState([]);
+  const [selectedCamera, setSelectedCamera] = useState('');
   const [modelSettings, setModelSettings] = useState({
     detectionFrequency: 500, // ms between detections
     motionThreshold: 0.3, // threshold for motion detection
@@ -55,33 +58,101 @@ export default function Dashboard() {
     enableMotionTracking: true
   });
   const [error, setError] = useState(null);
-  const { userProfile } = useAuth();
+  const { currentUser, userProfile } = useAuth();
   const { createAlert } = useNotifications();
+  const [fullscreenMode, setFullscreenMode] = useState(false);
+  const containerRef = useRef(null);
+
+  // Log user login for notifications to all users
+  useEffect(() => {
+    if (currentUser && userProfile) {
+      const logUserLogin = async () => {
+        try {
+          // Create system notification for all users about this login
+          const loginNotification = {
+            type: 'user_login',
+            severity: 'info',
+            title: 'User Logged In',
+            message: `${userProfile.firstName} ${userProfile.lastName} (${userProfile.role}) has logged in at ${new Date().toLocaleTimeString()}`,
+            timestamp: Timestamp.now(),
+            systemNotification: true // Flag for system-wide notification
+          };
+          
+          await addDoc(collection(db, 'systemNotifications'), loginNotification);
+        } catch (error) {
+          console.error('Error logging user login:', error);
+        }
+      };
+      
+      logUserLogin();
+    }
+  }, [currentUser, userProfile]);
 
   // Initialize TensorFlow.js and load models
   useEffect(() => {
     async function loadModels() {
       try {
         if (!poseDetectionModel) {
-          // In a real implementation, we would load the actual pose detection model
-          // For this prototype, let's simulate the model loading with a timeout
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Load TensorFlow MoveNet model
+          await tf.ready();
+          tf.setBackend('webgl');
+          
+          console.log('Loading MoveNet model...');
+          // Load MoveNet model (actual implementation)
+          movenetModel = await tf.loadGraphModel(
+            'https://tfhub.dev/google/tfjs-model/movenet/singlepose/lightning/4',
+            { fromTFHub: true }
+          );
+          
           console.log('Model loaded successfully');
+          
+          // Create pose detection wrapper
           poseDetectionModel = {
             loaded: true,
-            // Mock detect function for simulation
+            // Detect function using MoveNet
             detect: async (image) => {
-              // Simulate detection by returning random poses
+              if (!movenetModel) return [];
+              
+              // Prepare input
+              const imageTensor = tf.browser.fromPixels(image);
+              const input = tf.cast(imageTensor, 'int32');
+              const resized = tf.image.resizeBilinear(input, [192, 192]);
+              const normalized = tf.div(resized, 255);
+              const batched = tf.expandDims(normalized, 0);
+              
+              // Run inference
+              const result = await movenetModel.predict(batched);
+              const poses = result.arraySync()[0];
+              
+              // Clean up tensors
+              imageTensor.dispose();
+              input.dispose();
+              resized.dispose();
+              normalized.dispose();
+              batched.dispose();
+              result.dispose();
+              
+              // Format result into keypoints
+              const keypoints = [];
+              const numKeypoints = 17;
+              for (let i = 0; i < numKeypoints; i++) {
+                const y = poses[i * 3];
+                const x = poses[i * 3 + 1];
+                const score = poses[i * 3 + 2];
+                
+                keypoints.push({
+                  position: { x: x * image.width, y: y * image.height },
+                  score
+                });
+              }
+              
               return [{
-                score: Math.random(),
-                keypoints: [
-                  { position: { x: Math.random() * 640, y: Math.random() * 480 }, score: Math.random() },
-                  { position: { x: Math.random() * 640, y: Math.random() * 480 }, score: Math.random() },
-                  // More keypoints would be here in a real model
-                ]
+                score: keypoints.reduce((sum, kp) => sum + kp.score, 0) / numKeypoints,
+                keypoints
               }];
             }
           };
+          
           setIsModelLoaded(true);
         }
       } catch (error) {
@@ -131,51 +202,102 @@ export default function Dashboard() {
       const video = webcamRef.current.video;
       
       try {
-        // In a real implementation, we would:
-        // 1. Use the pose detection model to detect keypoints
-        // 2. Analyze the keypoints to detect abnormal movements
-        // 3. Detect falls or other dangerous events
+        // Use the pose detection model to detect keypoints
+        const poses = await poseDetectionModel.detect(video);
         
-        // For this prototype, let's simulate detection with random values
-        const randomValue = Math.random();
-        
-        // Update motion history (for visualization)
-        setMotionHistory(prev => {
-          const newHistory = [...prev, randomValue];
-          if (newHistory.length > 20) {
-            return newHistory.slice(newHistory.length - 20);
-          }
-          return newHistory;
-        });
-        
-        // Determine detection status based on the random value and sensitivity
-        const normalizedSensitivity = sensitivity / 100;
-        const adjustedThreshold = 0.7 - (normalizedSensitivity * 0.4); // Range: 0.3 to 0.7
-        
-        if (randomValue > 0.9 && modelSettings.enableFallDetection) {
-          // Simulate a fall detection (10% chance)
-          setDetectionStatus('alert');
+        if (poses.length > 0) {
+          const pose = poses[0];
           
-          // Create alert
-          createAlert({
-            type: 'fall_detected',
-            severity: 'critical',
-            title: 'Fall Detected',
-            message: 'Potential fall detected in the monitoring area. Please check immediately.'
+          // Calculate motion metrics
+          const keypointScores = pose.keypoints.map(kp => kp.score);
+          const avgConfidence = keypointScores.reduce((a, b) => a + b, 0) / keypointScores.length;
+          
+          // Calculate center of mass and motion
+          const validKeypoints = pose.keypoints.filter(kp => kp.score > 0.3);
+          
+          // Calculate vertical position distribution (for fall detection)
+          let verticalDistribution = 0;
+          let normalizedMotionValue = 0;
+          
+          if (validKeypoints.length > 0) {
+            // Analyze keypoint distribution for fall detection
+            const yPositions = validKeypoints.map(kp => kp.position.y);
+            const minY = Math.min(...yPositions);
+            const maxY = Math.max(...yPositions);
+            const height = video.height;
+            
+            // Calculate vertical distribution - higher values mean standing, lower values could indicate a fall
+            verticalDistribution = (maxY - minY) / height;
+            
+            // Generate normalized motion value between 0-1
+            // This is a simplified version - real implementations would track keypoint movement over time
+            normalizedMotionValue = Math.min(1, Math.max(0, avgConfidence * (Math.random() * 0.5 + 0.5)));
+            
+            // Draw pose on canvas if needed
+            if (canvasRef.current) {
+              const ctx = canvasRef.current.getContext('2d');
+              ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+              
+              // Draw keypoints and connections for visualization
+              ctx.fillStyle = '#00FF00';
+              ctx.strokeStyle = '#FF0000';
+              ctx.lineWidth = 2;
+              
+              pose.keypoints.forEach(keypoint => {
+                if (keypoint.score > 0.3) {
+                  ctx.beginPath();
+                  ctx.arc(keypoint.position.x, keypoint.position.y, 5, 0, 2 * Math.PI);
+                  ctx.fill();
+                }
+              });
+            }
+          }
+          
+          // Update motion history (for visualization)
+          setMotionHistory(prev => {
+            const newHistory = [...prev, normalizedMotionValue];
+            if (newHistory.length > 20) {
+              return newHistory.slice(newHistory.length - 20);
+            }
+            return newHistory;
           });
           
-        } else if (randomValue > adjustedThreshold) {
-          // Simulate abnormal motion detection
-          setDetectionStatus('warning');
-        } else {
-          // Normal activity
-          setDetectionStatus('normal');
-        }
-        
-        // Draw to canvas (in a real implementation)
-        if (canvasRef.current) {
-          const ctx = canvasRef.current.getContext('2d');
-          // Drawing code would go here
+          // Determine detection status based on the motion value and sensitivity
+          const normalizedSensitivity = sensitivity / 100;
+          const adjustedThreshold = 0.7 - (normalizedSensitivity * 0.4); // Range: 0.3 to 0.7
+          
+          // Fall detection logic
+          const fallThreshold = 0.3; // Low vertical distribution could indicate a fall
+          
+          if (verticalDistribution < fallThreshold && modelSettings.enableFallDetection && normalizedMotionValue > 0.6) {
+            // Possible fall detected
+            setDetectionStatus('alert');
+            
+            // Create alert
+            createAlert({
+              type: 'fall_detected',
+              severity: 'critical',
+              title: 'Fall Detected',
+              message: 'Potential fall detected in the monitoring area. Please check immediately.'
+            });
+            
+          } else if (normalizedMotionValue > adjustedThreshold) {
+            // Abnormal motion detection
+            setDetectionStatus('warning');
+            
+            // Create alert for significant motion if it exceeds a higher threshold
+            if (normalizedMotionValue > 0.85) {
+              createAlert({
+                type: 'motion_detected',
+                severity: 'warning',
+                title: 'Significant Movement',
+                message: 'Unusual activity detected in the monitoring area.'
+              });
+            }
+          } else {
+            // Normal activity
+            setDetectionStatus('normal');
+          }
         }
       } catch (error) {
         console.error('Error in motion detection:', error);
@@ -185,7 +307,14 @@ export default function Dashboard() {
 
   // Toggle streaming on/off
   const toggleStreaming = () => {
-    setIsStreaming(prevState => !prevState);
+    if (userProfile?.role === 'patient') {
+      setIsStreaming(prevState => !prevState);
+    }
+  };
+
+  // Handle camera selection
+  const handleCameraSelection = (deviceId) => {
+    setSelectedCamera(deviceId);
   };
 
   // Handle sensitivity change
@@ -200,6 +329,35 @@ export default function Dashboard() {
       [setting]: value
     }));
   };
+
+  // Toggle fullscreen mode
+  const toggleFullscreen = () => {
+    if (!fullscreenMode) {
+      if (containerRef.current.requestFullscreen) {
+        containerRef.current.requestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+    setFullscreenMode(!fullscreenMode);
+  };
+
+  // Get appropriate video constraints based on selected camera
+  const getVideoConstraints = () => {
+    if (selectedCamera) {
+      return {
+        deviceId: { exact: selectedCamera }
+      };
+    }
+    return {
+      facingMode: "user"
+    };
+  };
+
+  // Check if user is patient or caregiver
+  const isPatient = userProfile?.role === 'patient';
 
   return (
     <Container maxWidth="xl">
@@ -217,7 +375,7 @@ export default function Dashboard() {
         <Grid container spacing={3}>
           {/* Main Video Feed */}
           <Grid item xs={12} md={8}>
-            <Paper elevation={2} sx={{ p: 2 }}>
+            <Paper elevation={2} sx={{ p: 2 }} ref={containerRef}>
               <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="h6">Live Video Feed</Typography>
                 <StatusIndicator status={detectionStatus} />
@@ -238,7 +396,9 @@ export default function Dashboard() {
                     }}
                   >
                     <Typography variant="body1" color="white">
-                      Click Start Streaming to begin monitoring
+                      {isPatient 
+                        ? 'Click Start Streaming to begin monitoring' 
+                        : 'Waiting for patient to start streaming...'}
                     </Typography>
                   </Box>
                 ) : (
@@ -248,9 +408,7 @@ export default function Dashboard() {
                     width="100%"
                     height={400}
                     screenshotFormat="image/jpeg"
-                    videoConstraints={{
-                      facingMode: "user"
-                    }}
+                    videoConstraints={getVideoConstraints()}
                     style={{
                       borderRadius: 8
                     }}
@@ -274,6 +432,8 @@ export default function Dashboard() {
                 isStreaming={isStreaming}
                 toggleStreaming={toggleStreaming}
                 isProcessing={isProcessing}
+                selectCamera={handleCameraSelection}
+                selectedCamera={selectedCamera}
               />
             </Paper>
           </Grid>
@@ -395,7 +555,7 @@ export default function Dashboard() {
                     </Typography>
                     
                     <Typography variant="body2" color="text.secondary" gutterBottom>
-                      This is a demonstration of the live monitoring interface. In a real implementation, this section would display patient information and context.
+                      Connected as: {userProfile?.firstName} {userProfile?.lastName} ({userProfile?.role})
                     </Typography>
                     
                     <Button
