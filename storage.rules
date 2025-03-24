@@ -1,12 +1,31 @@
 rules_version = '2';
-
 // Craft rules based on data in your Firestore database
 // allow write: if firestore.get(
 //    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
 service firebase.storage {
   match /b/{bucket}/o {
+    // Base rule - deny access by default
     match /{allPaths=**} {
       allow read, write: if false;
+    }
+    
+    // Allow users to access profile images
+    match /profileImages/{userId}/{filename} {
+      // Allow users to read and write only their own profile images
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow temporary storage of alert screenshots/evidence
+    match /alerts/{userId}/{alertId}/{filename} {
+      // Allow users to read and write only their own alert images
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow primary caregivers to read alert images for patients they monitor
+      allow read: if request.auth != null && 
+                  exists(/databases/$(database)/documents/users/$(userId)) &&
+                  get(/databases/$(database)/documents/users/$(userId)).data.primaryCaregiverId == request.auth.uid;
     }
   }
 }

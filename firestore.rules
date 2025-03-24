@@ -2,8 +2,41 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is accessing their own data
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Users can read and write only their own data
+      allow read, write: if isOwner(userId);
+      // Primary caregivers can read patient data they're associated with
+      allow read: if isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'primary_caregiver' &&
+        resource.data.primaryCaregiverId == request.auth.uid;
+    }
+    
+    // Alerts collection
+    match /alerts/{alertId} {
+      // Users can read alerts associated with them
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Users can create alerts
+      allow create: if isAuthenticated();
+    }
+    
+    // FCM Tokens collection
+    match /fcmTokens/{tokenId} {
+      // Users can read and write only their own tokens
+      allow read, write: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Allow creation of new tokens for authenticated users
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
     }
   }
 }
