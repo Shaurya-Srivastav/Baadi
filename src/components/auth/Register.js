@@ -119,7 +119,7 @@ export default function Register() {
   };
 
   async function handleSubmit(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
     
     // Final validation before submission
     if (!validateStep()) return;
@@ -179,7 +179,7 @@ export default function Register() {
 
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-            <Box component="form" onSubmit={activeStep === 2 ? handleSubmit : undefined} noValidate>
+            <Box component="form" noValidate>
               {activeStep === 0 && (
                 <>
                   <TextField
@@ -298,6 +298,7 @@ export default function Register() {
                     variant="contained"
                     color="primary"
                     disabled={loading || checkingEmail}
+                    onClick={handleSubmit}
                   >
                     {loading ? 'Creating Account...' : 'Create Account'}
                   </Button>
