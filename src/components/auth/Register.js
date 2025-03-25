@@ -14,8 +14,11 @@ import {
   Stepper,
   Step,
   StepLabel,
-  CircularProgress
+  CircularProgress,
+  InputAdornment,
+  IconButton
 } from '@mui/material';
+import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 
 const steps = ['Account Information', 'Personal Details', 'Role Selection'];
@@ -25,6 +28,8 @@ const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 export default function Register() {
   const [activeStep, setActiveStep] = useState(0);
+
+  // Form fields
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [password, setPassword] = useState('');
@@ -32,25 +37,33 @@ export default function Register() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [role, setRole] = useState('caregiver');
+
+  // UI / state
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [checkingEmail, setCheckingEmail] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   const { signup, checkEmailExists } = useAuth();
   const navigate = useNavigate();
 
+  // ------------------------------------------------
   // Email validation with debounce
+  // ------------------------------------------------
   useEffect(() => {
     if (!email) {
       setEmailError('');
       return;
     }
 
+    // Basic client-side validation
     if (!EMAIL_REGEX.test(email)) {
       setEmailError('Please enter a valid email address');
       return;
     }
 
+    // Check email availability (debounced)
     const checkEmail = async () => {
       setCheckingEmail(true);
       try {
@@ -71,8 +84,15 @@ export default function Register() {
     return () => clearTimeout(timer);
   }, [email, checkEmailExists]);
 
-  const validateStep = (step) => {
-    if (step === 0) {
+  // ------------------------------------------------
+  // Step validation
+  // ------------------------------------------------
+  const validateStep = (stepIndex) => {
+    // Clear any existing error
+    setError('');
+
+    // Step 0: Account Information
+    if (stepIndex === 0) {
       if (!email) {
         setError('Email is required');
         return false;
@@ -93,7 +113,10 @@ export default function Register() {
         setError('Passwords do not match');
         return false;
       }
-    } else if (step === 1) {
+    }
+
+    // Step 1: Personal Details
+    if (stepIndex === 1) {
       if (!firstName) {
         setError('First name is required');
         return false;
@@ -103,22 +126,41 @@ export default function Register() {
         return false;
       }
     }
+
+    // Step 2: Role Selection
+    // (No specific validations other than you have a role selected; you do by default.)
     return true;
   };
 
+  // ------------------------------------------------
+  // Next/Back logic
+  // ------------------------------------------------
   const handleNext = () => {
-    setError('');
+    // Validate the current step
     if (!validateStep(activeStep)) return;
-    
-    setActiveStep((prevStep) => prevStep + 1);
+
+    // Persist form state in localStorage
+    localStorage.setItem('registerFormState', JSON.stringify({
+      email,
+      password,
+      confirmPassword,
+      firstName,
+      lastName,
+      role
+    }));
+
+    // Move to the next step
+    setActiveStep((prev) => prev + 1);
   };
 
   const handleBack = () => {
     setError('');
-    setActiveStep((prevStep) => prevStep - 1);
+    setActiveStep((prev) => prev - 1);
   };
 
-  // Load saved form state when component mounts
+  // ------------------------------------------------
+  // Load & cleanup form state from localStorage
+  // ------------------------------------------------
   useEffect(() => {
     const savedState = localStorage.getItem('registerFormState');
     if (savedState) {
@@ -131,53 +173,53 @@ export default function Register() {
         role: savedRole
       } = JSON.parse(savedState);
       
-      setEmail(savedEmail);
-      setPassword(savedPassword);
-      setConfirmPassword(savedConfirmPassword);
-      setFirstName(savedFirstName);
-      setLastName(savedLastName);
-      setRole(savedRole);
+      setEmail(savedEmail || '');
+      setPassword(savedPassword || '');
+      setConfirmPassword(savedConfirmPassword || '');
+      setFirstName(savedFirstName || '');
+      setLastName(savedLastName || '');
+      setRole(savedRole || 'caregiver');
     }
   }, []);
 
-  // Clear saved form state when component unmounts
   useEffect(() => {
+    // Cleanup local storage on unmount
     return () => {
       localStorage.removeItem('registerFormState');
     };
   }, []);
 
-  async function handleSubmit(e) {
-    if (e) e.preventDefault();
-    
-    // Final validation before submission
+  // ------------------------------------------------
+  // Final form submission
+  // ------------------------------------------------
+  async function handleSubmit() {
+    // Validate the final step (role selection),
+    // so we check activeStep=2 if needed
     if (!validateStep(activeStep)) return;
 
     try {
       setError('');
       setLoading(true);
       
-      // Only create account when explicitly called
       await signup(email, password, firstName, lastName, role);
       navigate('/dashboard');
-    } catch (error) {
-      console.error('Registration error:', error);
-      if (error.code === 'auth/email-already-in-use') {
-        setError('Email is already in use. Please try a different email or login.');
-      } else if (error.code === 'auth/invalid-email') {
-        setError('Invalid email format. Please enter a valid email address.');
-      } else if (error.code === 'auth/weak-password') {
-        setError('Password is too weak. Please choose a stronger password.');
-      } else if (error.code === 'permission-denied') {
-        setError('You do not have permission to register. Please contact support.');
-      } else {
-        setError('Failed to create an account. Please try again.');
-      }
+    } catch (err) {
+      console.error('Registration error:', err);
+      setError('Failed to create account. Please try again.');
     } finally {
       setLoading(false);
     }
   }
 
+  // ------------------------------------------------
+  // Toggle password visibility
+  // ------------------------------------------------
+  const handleClickShowPassword = () => setShowPassword((show) => !show);
+  const handleClickShowConfirmPassword = () => setShowConfirmPassword((show) => !show);
+
+  // ------------------------------------------------
+  // Rendering
+  // ------------------------------------------------
   return (
     <Container maxWidth="sm">
       <Box
@@ -209,7 +251,10 @@ export default function Register() {
 
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-            <Box component="form" noValidate>
+            {/* We are NOT using a <form> here for a multi-step approach */}
+            {/* This prevents the browser from submitting/reloading automatically */}
+            <Box>
+              {/* Step 0: Account Info */}
               {activeStep === 0 && (
                 <>
                   <TextField
@@ -237,11 +282,24 @@ export default function Register() {
                     fullWidth
                     name="password"
                     label="Password"
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     id="password"
                     autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            aria-label="toggle password visibility"
+                            onClick={handleClickShowPassword}
+                            edge="end"
+                          >
+                            {showPassword ? <VisibilityOff /> : <Visibility />}
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }}
                   />
                   <TextField
                     margin="normal"
@@ -249,94 +307,109 @@ export default function Register() {
                     fullWidth
                     name="confirmPassword"
                     label="Confirm Password"
-                    type="password"
+                    type={showConfirmPassword ? 'text' : 'password'}
                     id="confirmPassword"
-                    autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            aria-label="toggle password visibility"
+                            onClick={handleClickShowConfirmPassword}
+                            edge="end"
+                          >
+                            {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }}
                   />
                 </>
               )}
               
+              {/* Step 1: Personal Details */}
               {activeStep === 1 && (
-                <>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6}>
-                      <TextField
-                        margin="normal"
-                        required
-                        fullWidth
-                        id="firstName"
-                        label="First Name"
-                        name="firstName"
-                        autoComplete="given-name"
-                        value={firstName}
-                        onChange={(e) => setFirstName(e.target.value)}
-                      />
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField
-                        margin="normal"
-                        required
-                        fullWidth
-                        id="lastName"
-                        label="Last Name"
-                        name="lastName"
-                        autoComplete="family-name"
-                        value={lastName}
-                        onChange={(e) => setLastName(e.target.value)}
-                      />
-                    </Grid>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      margin="normal"
+                      required
+                      fullWidth
+                      id="firstName"
+                      label="First Name"
+                      name="firstName"
+                      autoComplete="given-name"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                    />
                   </Grid>
-                </>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      margin="normal"
+                      required
+                      fullWidth
+                      id="lastName"
+                      label="Last Name"
+                      name="lastName"
+                      autoComplete="family-name"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                    />
+                  </Grid>
+                </Grid>
               )}
               
+              {/* Step 2: Role Selection */}
               {activeStep === 2 && (
-                <>
-                  <TextField
-                    select
-                    margin="normal"
-                    required
-                    fullWidth
-                    id="role"
-                    label="Your Role"
-                    name="role"
-                    value={role}
-                    onChange={(e) => setRole(e.target.value)}
-                    helperText="Please select your role in patient care"
-                  >
-                    <MenuItem value="caregiver">Primary Caregiver</MenuItem>
-                    <MenuItem value="secondary_caregiver">Secondary Caregiver</MenuItem>
-                    <MenuItem value="family_member">Family Member</MenuItem>
-                    <MenuItem value="patient">Patient</MenuItem>
-                  </TextField>
-                </>
+                <TextField
+                  select
+                  margin="normal"
+                  required
+                  fullWidth
+                  id="role"
+                  label="Your Role"
+                  name="role"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  helperText="Please select your role in patient care"
+                >
+                  <MenuItem value="caregiver">Primary Caregiver</MenuItem>
+                  <MenuItem value="secondary_caregiver">Secondary Caregiver</MenuItem>
+                  <MenuItem value="family_member">Family Member</MenuItem>
+                  <MenuItem value="patient">Patient</MenuItem>
+                </TextField>
               )}
               
+              {/* Navigation Buttons */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
                 <Button
                   disabled={activeStep === 0}
                   onClick={handleBack}
                   variant="outlined"
+                  type="button"
                 >
                   Back
                 </Button>
                 
                 {activeStep === steps.length - 1 ? (
+                  // Final Step => Create Account
                   <Button
-                    type="submit"
                     variant="contained"
                     color="primary"
                     disabled={loading || checkingEmail}
+                    type="button"
                     onClick={handleSubmit}
                   >
                     {loading ? 'Creating Account...' : 'Create Account'}
                   </Button>
                 ) : (
+                  // Intermediate Step => Next
                   <Button
                     variant="contained"
-                    onClick={handleNext}
                     disabled={checkingEmail}
+                    type="button"  // Prevent default submit
+                    onClick={handleNext}
                   >
                     Next
                   </Button>
