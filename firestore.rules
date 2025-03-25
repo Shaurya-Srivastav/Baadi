@@ -7,18 +7,6 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    // Helper function to check if user is accessing their own data
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    // Helper function to check if user is primary caregiver of a patient
-    function isPrimaryCaregiverOf(patientId) {
-      return isAuthenticated() && 
-        exists(/databases/$(database)/documents/patients/$(patientId)) &&
-        get(/databases/$(database)/documents/patients/$(patientId)).data.primaryCaregiver == request.auth.uid;
-    }
-    
     // Helper function to check if user is admin
     function isAdmin() {
       return isAuthenticated() && 
@@ -37,7 +25,6 @@ service cloud.firestore {
       // Allow access to patient data for caregivers
       allow read, write: if request.auth != null && (
         request.auth.uid == patientId || 
-        isPrimaryCaregiverOf(patientId) ||
         isAdmin()
       );
     }
@@ -45,17 +32,12 @@ service cloud.firestore {
     // Alerts collection
     match /alerts/{alertId} {
       // Users can read alerts associated with them
-      allow read: if request.auth != null && (
-        request.auth.uid == resource.data.patientId || 
-        isPrimaryCaregiverOf(resource.data.patientId) ||
-        isAdmin()
-      );
+      allow read: if request.auth != null;
       // Users can create alerts
       allow create: if request.auth != null;
       // Users can update and delete alerts associated with them
       allow update, delete: if request.auth != null && (
         request.auth.uid == resource.data.patientId || 
-        isPrimaryCaregiverOf(resource.data.patientId) ||
         isAdmin()
       );
     }
@@ -64,6 +46,36 @@ service cloud.firestore {
     match /fcmTokens/{tokenId} {
       // Users can read and write only their own tokens
       allow read, write: if request.auth != null && request.auth.uid == tokenId;
+    }
+
+    // Stream Sessions collection
+    match /streamSessions/{sessionId} {
+      // All authenticated users can read stream sessions
+      allow read: if isAuthenticated();
+      // All authenticated users can create stream sessions
+      allow create: if isAuthenticated();
+      // Only the creator or admin can update/delete their stream sessions
+      allow update, delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.patientId || 
+        isAdmin()
+      );
+    }
+
+    // System Notifications collection - updated to allow full access
+    match /systemNotifications/{notificationId} {
+      // All authenticated users can read/write system notifications
+      allow read, write: if isAuthenticated();
+    }
+
+    // Personal Notifications collection
+    match /notifications/{notificationId} {
+      // All authenticated users can read and create notifications
+      allow read, create: if isAuthenticated();
+      // Only the target user or admin can update/delete notifications
+      allow update, delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId || 
+        isAdmin()
+      );
     }
 
     // Default rule - deny access

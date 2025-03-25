@@ -10,7 +10,7 @@ import {
   updatePassword,
   fetchSignInMethodsForEmail
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
 const AuthContext = createContext();
@@ -59,7 +59,7 @@ export function AuthProvider({ children }) {
         lastName,
         email,
         role: role || 'caregiver', // Default role
-        createdAt: serverTimestamp(),
+        createdAt: new Date(),
         settings: {
           alertSensitivity: 'medium',
           notificationPreferences: {
@@ -78,8 +78,8 @@ export function AuthProvider({ children }) {
           lastName,
           email,
           primaryCaregiver: null,
-          createdAt: serverTimestamp(),
-          lastActive: serverTimestamp(),
+          createdAt: new Date(),
+          lastActive: new Date(),
           status: 'active'
         });
       }
@@ -118,7 +118,7 @@ export function AuthProvider({ children }) {
       // Update Firestore document
       await setDoc(doc(db, 'users', currentUser.uid), {
         ...profileData,
-        updatedAt: serverTimestamp()
+        updatedAt: new Date()
       }, { merge: true });
       
       // Fetch the updated profile

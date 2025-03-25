@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { collection, addDoc, query, where, onSnapshot, orderBy, limit, Timestamp, updateDoc, doc, getDocs, getDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, orderBy, limit, Timestamp, updateDoc, doc, getDocs, getDoc, setDoc } from 'firebase/firestore';
 import { db, initializeMessaging } from '../firebase';
 import { useAuth } from './AuthContext';
 import { getToken, onMessage } from 'firebase/messaging';
@@ -38,8 +38,9 @@ export function NotificationProvider({ children }) {
               
               setFcmToken(token);
               
-              // Store the token in Firestore
-              await addDoc(collection(db, 'fcmTokens'), {
+              // Store the token in Firestore using a unique ID to prevent duplicates
+              const tokenId = `token_${currentUser.uid}_${Date.now()}`;
+              await setDoc(doc(db, 'fcmTokens', tokenId), {
                 token,
                 userId: currentUser.uid,
                 createdAt: Timestamp.now()
@@ -132,31 +133,42 @@ export function NotificationProvider({ children }) {
     );
 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const systemNotificationsList = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        timestamp: doc.data().timestamp?.toDate()
-      }));
-      
-      setSystemNotifications(systemNotificationsList);
-      
-      // Create local notifications for any new system notifications
-      systemNotificationsList.forEach(notification => {
-        // Check if this is a new notification we haven't processed yet
-        if (!notification.processedByUser?.includes(currentUser.uid)) {
-          // Create a local alert for this system notification
-          createAlert({
-            type: notification.type,
-            severity: notification.severity,
-            title: notification.title,
-            message: notification.message,
-            systemNotificationId: notification.id
-          });
-          
-          // Mark as processed for this user
-          updateSystemNotificationProcessed(notification.id);
-        }
-      });
+      try {
+        const systemNotificationsList = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          timestamp: doc.data().timestamp?.toDate()
+        }));
+        
+        setSystemNotifications(systemNotificationsList);
+        
+        // Safely process system notifications
+        systemNotificationsList.forEach(notification => {
+          try {
+            // Check if processedByUser exists and is an array
+            const processedByUser = notification.processedByUser || [];
+            
+            // Check if this is a new notification we haven't processed yet
+            if (!processedByUser.includes(currentUser.uid)) {
+              // Create a local alert for this system notification
+              createAlert({
+                type: notification.type || 'system',
+                severity: notification.severity || 'info',
+                title: notification.title || 'System Notification',
+                message: notification.message || '',
+                systemNotificationId: notification.id
+              });
+              
+              // Mark as processed for this user
+              updateSystemNotificationProcessed(notification.id);
+            }
+          } catch (notifError) {
+            console.error('Error processing notification:', notifError);
+          }
+        });
+      } catch (error) {
+        console.error('Error processing system notifications:', error);
+      }
     }, (error) => {
       console.error('Error fetching system notifications:', error);
     });
@@ -186,14 +198,20 @@ export function NotificationProvider({ children }) {
       }
     } catch (error) {
       console.error('Error updating system notification:', error);
+      // Non-critical error, can be safely ignored
     }
   }
 
-  // Function to create a new alert
+  // Function to create a new alert with a unique ID to prevent duplicates
   async function createAlert(alertData) {
     if (!currentUser) return null;
     
     try {
+      // Generate a unique ID based on timestamp and a random value
+      const timestamp = Date.now();
+      const randomValue = Math.floor(Math.random() * 10000);
+      const alertId = `alert_${currentUser.uid}_${timestamp}_${randomValue}`;
+      
       const newAlert = {
         userId: currentUser.uid,
         timestamp: Timestamp.now(),
@@ -201,8 +219,9 @@ export function NotificationProvider({ children }) {
         ...alertData
       };
       
-      const docRef = await addDoc(collection(db, 'alerts'), newAlert);
-      return { id: docRef.id, ...newAlert };
+      // Use setDoc with the custom ID instead of addDoc
+      await setDoc(doc(db, 'alerts', alertId), newAlert);
+      return { id: alertId, ...newAlert };
     } catch (error) {
       console.error('Error creating alert:', error);
       return null;
@@ -233,11 +252,16 @@ export function NotificationProvider({ children }) {
     }
   }
 
-  // Function to create a system notification (for all users)
+  // Function to create a system notification (for all users) with a unique ID
   async function createSystemNotification(notificationData) {
     if (!currentUser) return null;
     
     try {
+      // Generate a unique ID based on timestamp and a random value
+      const timestamp = Date.now();
+      const randomValue = Math.floor(Math.random() * 10000);
+      const notificationId = `system_${currentUser.uid}_${timestamp}_${randomValue}`;
+      
       const newNotification = {
         createdByUserId: currentUser.uid,
         timestamp: Timestamp.now(),
@@ -246,8 +270,9 @@ export function NotificationProvider({ children }) {
         ...notificationData
       };
       
-      const docRef = await addDoc(collection(db, 'systemNotifications'), newNotification);
-      return { id: docRef.id, ...newNotification };
+      // Use setDoc with the custom ID instead of addDoc
+      await setDoc(doc(db, 'systemNotifications', notificationId), newNotification);
+      return { id: notificationId, ...newNotification };
     } catch (error) {
       console.error('Error creating system notification:', error);
       return null;

@@ -1,11 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Button, Stack, CircularProgress, Tooltip, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
+import { Box, Button, Stack, CircularProgress, Tooltip, FormControl, InputLabel, Select, MenuItem, Dialog, DialogTitle, DialogContent, DialogActions, Slider, Typography } from '@mui/material';
 import { PlayArrow, Pause, Settings, Fullscreen, Videocam } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 
-const VideoControls = ({ isStreaming, toggleStreaming, isProcessing, selectCamera, selectedCamera }) => {
+const VideoControls = ({ 
+  isStreaming, 
+  toggleStreaming, 
+  isProcessing, 
+  selectCamera, 
+  selectedCamera, 
+  toggleFullscreen, 
+  fullscreenMode,
+  videoSettings,
+  setVideoSettings
+}) => {
   const [availableCameras, setAvailableCameras] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { userProfile } = useAuth();
 
   useEffect(() => {
@@ -24,6 +35,17 @@ const VideoControls = ({ isStreaming, toggleStreaming, isProcessing, selectCamer
 
     getAvailableCameras();
   }, []);
+
+  const handleSettingsChange = (setting, value) => {
+    setVideoSettings(prev => ({
+      ...prev,
+      [setting]: value
+    }));
+  };
+
+  const toggleSettings = () => {
+    setSettingsOpen(prev => !prev);
+  };
 
   const isPatient = userProfile?.role === 'patient';
 
@@ -92,23 +114,61 @@ const VideoControls = ({ isStreaming, toggleStreaming, isProcessing, selectCamer
             variant="outlined"
             color="primary"
             startIcon={<Settings />}
-            disabled={!isPatient}
+            disabled={!isPatient && !isStreaming}
+            onClick={toggleSettings}
           >
             Video Settings
           </Button>
         </Tooltip>
         
-        <Tooltip title="Fullscreen">
+        <Tooltip title={fullscreenMode ? "Exit Fullscreen" : "Fullscreen"}>
           <Button
             size="small"
             variant="outlined"
             color="primary"
             startIcon={<Fullscreen />}
+            onClick={toggleFullscreen}
           >
-            Fullscreen
+            {fullscreenMode ? "Exit Fullscreen" : "Fullscreen"}
           </Button>
         </Tooltip>
       </Stack>
+
+      {/* Video Settings Dialog */}
+      <Dialog open={settingsOpen} onClose={toggleSettings}>
+        <DialogTitle>Video Settings</DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>Brightness: {videoSettings?.brightness || 100}%</Typography>
+          <Slider
+            value={videoSettings?.brightness || 100}
+            onChange={(e, val) => handleSettingsChange('brightness', val)}
+            min={0}
+            max={200}
+            valueLabelDisplay="auto"
+          />
+          
+          <Typography gutterBottom>Contrast: {videoSettings?.contrast || 100}%</Typography>
+          <Slider
+            value={videoSettings?.contrast || 100}
+            onChange={(e, val) => handleSettingsChange('contrast', val)}
+            min={0}
+            max={200}
+            valueLabelDisplay="auto"
+          />
+          
+          <Typography gutterBottom>Saturation: {videoSettings?.saturation || 100}%</Typography>
+          <Slider
+            value={videoSettings?.saturation || 100}
+            onChange={(e, val) => handleSettingsChange('saturation', val)}
+            min={0}
+            max={200}
+            valueLabelDisplay="auto"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={toggleSettings}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
